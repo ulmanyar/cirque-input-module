@@ -211,7 +211,7 @@ static int pinnacle_era_write(const struct device *dev, const uint16_t addr, uin
 
 static void pinnacle_report_data(const struct device *dev) {
     const struct pinnacle_config *config = dev->config;
-    uint8_t packet[3];
+    uint8_t packet[4];
     int ret;
     ret = pinnacle_seq_read(dev, PINNACLE_STATUS1, packet, 1);
     if (ret < 0) {
@@ -221,7 +221,7 @@ static void pinnacle_report_data(const struct device *dev) {
     if (!(packet[0] & PINNACLE_STATUS1_SW_DR)) {
         return;
     }
-    ret = pinnacle_seq_read(dev, PINNACLE_2_2_PACKET0, packet, 3);
+    ret = pinnacle_seq_read(dev, PINNACLE_2_2_PACKET0, packet, 4);
     if (ret < 0) {
         LOG_ERR("read packet: %d", ret);
         return;
@@ -231,6 +231,7 @@ static void pinnacle_report_data(const struct device *dev) {
                   (PINNACLE_PACKET0_BTN_PRIM | PINNACLE_PACKET0_BTN_SEC | PINNACLE_PACKET0_BTN_AUX);
     int16_t dx = (int16_t)(int8_t)packet[1];
     int16_t dy = (int16_t)(int8_t)packet[2];
+    int16_t wheel_value = (int16_t)(int8_t)packet[3];
     LOG_DBG("button: %d, dx: %d dy: %d", btn, dx, dy);
     if (data->in_int) {
         LOG_DBG("Clearing status bit");
@@ -249,6 +250,16 @@ static void pinnacle_report_data(const struct device *dev) {
 
     data->btn_cache = btn;
 
+    /*
+        Conceptual ideas:
+        - instead of reading dx, dy, we need to add the scroll bits/values, these must in turn be
+        read from the Pinnacle device
+        - the wheel_value should be parsed from the fourth byte, PacketByte_3
+        - sync flag is whether or not the set bits shall be synced with device, and will be
+        triggered on last event to be reported.
+
+    */
+    input_report_rel(dev, INPUT_REL_WHEEL, wheel_value, false, K_FOREVER);
     input_report_rel(dev, INPUT_REL_X, dx, false, K_FOREVER);
     input_report_rel(dev, INPUT_REL_Y, dy, true, K_FOREVER);
 
