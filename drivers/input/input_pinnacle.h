@@ -89,7 +89,7 @@ struct pinnacle_config {
 #elif DT_INST_ON_BUS(0, spi)
     const struct spi_dt_spec bus;
 #endif
-    bool rotate_90, sleep_en, no_taps;
+    bool rotate_90, sleep_en, no_taps, abs_mode;
     enum pinnacle_sensitivity sensitivity;
     const struct gpio_dt_spec dr;
 };
