@@ -68,9 +68,18 @@
 #define PINNACLE_PACKET0_X_SIGN BIT(4)   // X delta sign
 #define PINNACLE_PACKET0_Y_SIGN BIT(5)   // Y delta sign
 
+#define JOYSTICK_XSCALING 26
+#define JOYSTICK_YSCALING 20
+
+struct xy_point {
+    int16_t x;
+    int16_t y;
+};
+
 struct pinnacle_data {
     uint8_t btn_cache;
     bool in_int;
+    struct xy_point finger_down;
     const struct device *dev;
     struct gpio_callback gpio_cb;
     struct k_work work;

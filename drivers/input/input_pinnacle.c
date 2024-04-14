@@ -209,53 +209,7 @@ static int pinnacle_era_write(const struct device *dev, const uint16_t addr, uin
     return ret;
 }
 
-static void pinnacle_report_data_rel(const struct device *dev) {
-    const struct pinnacle_config *config = dev->config;
-    uint8_t packet[3];
-    int ret;
-    ret = pinnacle_seq_read(dev, PINNACLE_STATUS1, packet, 1);
-    if (ret < 0) {
-        LOG_ERR("read status: %d", ret);
-        return;
-    }
-    if (!(packet[0] & PINNACLE_STATUS1_SW_DR)) {
-        return;
-    }
-    ret = pinnacle_seq_read(dev, PINNACLE_2_2_PACKET0, packet, 3);
-    if (ret < 0) {
-        LOG_ERR("read packet: %d", ret);
-        return;
-    }
-    struct pinnacle_data *data = dev->data;
-    uint8_t btn = packet[0] &
-                  (PINNACLE_PACKET0_BTN_PRIM | PINNACLE_PACKET0_BTN_SEC | PINNACLE_PACKET0_BTN_AUX);
-    int16_t dx = (int16_t)(int8_t)packet[1];
-    int16_t dy = (int16_t)(int8_t)packet[2];
-    LOG_DBG("button: %d, dx: %d dy: %d", btn, dx, dy);
-    if (data->in_int) {
-        LOG_DBG("Clearing status bit");
-        ret = pinnacle_clear_status(dev);
-        data->in_int = true;
-    }
-
-    if (!config->no_taps && (btn || data->btn_cache)) {
-        for (int i = 0; i < 3; i++) {
-            uint8_t btn_val = btn & BIT(i);
-            if (btn_val != (data->btn_cache & BIT(i))) {
-                input_report_key(dev, INPUT_BTN_0 + i, btn_val ? 1 : 0, false, K_FOREVER);
-            }
-        }
-    }
-
-    data->btn_cache = btn;
-
-    input_report_rel(dev, INPUT_REL_X, dx, false, K_FOREVER);
-    input_report_rel(dev, INPUT_REL_Y, dy, true, K_FOREVER);
-
-    return;
-}
-
-static void pinnacle_report_data_abs(const struct device *dev) {
+static void pinnacle_report_data(const struct device *dev) {
     const struct pinnacle_config *config = dev->config;
     uint8_t packet[6];
     int ret;
@@ -276,11 +230,8 @@ static void pinnacle_report_data_abs(const struct device *dev) {
     // TODO: Enable SW3-SW5 as well
     uint8_t btn = packet[0] &
                   (PINNACLE_PACKET0_BTN_PRIM | PINNACLE_PACKET0_BTN_SEC | PINNACLE_PACKET0_BTN_AUX);
-    uint8_t x_low = packet[2];
-    uint8_t y_low = packet[3];
-    uint8_t xy_high = packet[4];
-    int16_t x = ((xy_high & 0x0F) << 8) | x_low;
-    int16_t y = ((xy_high & 0xF0) << 4) | y_low;
+    int16_t x = ((packet[4] & 0x0F) << 8) | packet[2];
+    int16_t y = ((packet[4] & 0xF0) << 4) | packet[3];
     LOG_DBG("button: %d, x: %d y: %d", btn, x, y);
     if (data->in_int) {
         LOG_DBG("Clearing status bit");
@@ -299,20 +250,31 @@ static void pinnacle_report_data_abs(const struct device *dev) {
 
     data->btn_cache = btn;
 
-    input_report_abs(dev, INPUT_ABS_X, x, false, K_FOREVER);
-    input_report_abs(dev, INPUT_ABS_Y, y, true, K_FOREVER);
+    if (x || y) { // Position reported -> touch
+        if (!(data->finger_down.x || data->finger_down.y)) { // Centre point not set -> new finger down event
+            LOG_DBG("finger_down.x: %d, finger_down.y: %d", x, y);
+            data->finger_down.x = x;
+            data->finger_down.y = y;
+        }
+        // TODO: Figure out how to scale this
+        x = (x - data->finger_down.x) / JOYSTICK_XSCALING;
+        y = (data->finger_down.y - y) / JOYSTICK_YSCALING;
+        input_report_rel(dev, INPUT_REL_X, x, false, K_FOREVER);
+        input_report_rel(dev, INPUT_REL_Y, y, true, K_FOREVER);
+    } else { // (0, 0) reported -> no touch
+        if (data->finger_down.x || data->finger_down.y) { // Centre point set -> unset as finger up event
+            LOG_DBG("finger_down.x: %d, finger_down.y: %d", x, y);
+            data->finger_down.x = 0;
+            data->finger_down.y = 0;
+        }
+    }
 
     return;
 }
 
 static void pinnacle_work_cb(struct k_work *work) {
     struct pinnacle_data *data = CONTAINER_OF(work, struct pinnacle_data, work);
-    const struct pinnacle_config *config = data->dev->config;
-    if (config->abs_mode) {
-        pinnacle_report_data_abs(data->dev);
-    } else {
-        pinnacle_report_data_rel(data->dev);
-    }
+    pinnacle_report_data(data->dev);
 }
 
 static void pinnacle_gpio_cb(const struct device *port, struct gpio_callback *cb, uint32_t pins) {
